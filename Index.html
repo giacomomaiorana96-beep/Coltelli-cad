@@ -1,0 +1,217 @@
+
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#17212b">
+<title>Coltelli CAD</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:15px system-ui;background:#17212b;color:#f5f7fa}
+header{padding:14px;background:#17212b}
+h1{font-size:21px;margin:0}
+small{color:#b8c4d0}
+.toolbar{display:flex;gap:7px;flex-wrap:wrap;padding:10px;background:#263441}
+button{border:1px solid #637382;border-radius:8px;padding:10px 12px;background:#354654;color:white;font-size:14px}
+button.active{background:#087e8b;border-color:#43c7cf}
+main{padding:10px}
+#board{height:58vh;min-height:280px;background:#fff;border-radius:8px;overflow:hidden;touch-action:none}
+svg{width:100%;height:100%;display:block}
+.panel{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0}
+input{width:85px;padding:8px;border-radius:6px;border:1px solid #637382}
+label{font-size:13px}
+footer{padding:0 12px 16px;color:#b8c4d0;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+<h1>Coltelli CAD</h1>
+<small>Prototipo 0.1 · Unità di disegno in mm</small>
+</header>
+<div class="toolbar">
+<button id="select" class="active">Seleziona</button>
+<button id="pan">Sposta vista</button>
+<button id="hole">Inserisci foro</button>
+<button id="minus">− Zoom</button>
+<button id="plus">+ Zoom</button>
+<button id="save">Salva</button>
+<button id="export">Esporta SVG</button>
+</div>
+<main>
+<div id="board">
+<svg id="drawing" xmlns="http://www.w3.org/2000/svg"
+viewBox="0 0 300 200">
+<defs>
+<pattern id="grid" width="5" height="5"
+patternUnits="userSpaceOnUse">
+<path d="M5 0H0V5" fill="none" stroke="#e8edf0" stroke-width=".2"/>
+</pattern>
+<pattern id="biggrid" width="25" height="25"
+patternUnits="userSpaceOnUse">
+<rect width="25" height="25" fill="url(#grid)"/>
+<path d="M25 0H0V25" fill="none" stroke="#cbd5dc" stroke-width=".35"/>
+</pattern>
+</defs>
+<rect x="-5000" y="-5000" width="10000" height="10000"
+fill="url(#biggrid)"/>
+<g id="parts"></g>
+</svg>
+</div>
+<div class="panel">
+<label>Diametro foro (mm)
+<input id="diameter" type="number" value="6" min="0.5" max="100" step="0.5">
+</label>
+<label>Nome progetto
+<input id="project" value="Progetto 1">
+</label>
+</div>
+<div class="panel">
+<button id="undo">Annulla ultimo foro</button>
+<button id="clear">Nuovo disegno</button>
+</div>
+<div id="status" role="status">Modalità: seleziona</div>
+</main>
+<footer>
+Prototipo iniziale. I valori geometrici sono espressi in mm.
+Prima di fabbricare una dima, verifica le dimensioni con una stampa di prova.
+</footer>
+<script>
+(function(){
+const svg=document.getElementById('drawing');
+const parts=document.getElementById('parts');
+const board=document.getElementById('board');
+const status=document.getElementById('status');
+const NS='http://www.w3.org/2000/svg';
+let mode='select',holes=[],selected=-1;
+let view={x:0,y:0,w:300,h:200};
+let gesture=null,moved=false;
+
+function message(s){status.textContent=s}
+function render(){
+svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
+parts.replaceChildren();
+holes.forEach((h,i)=>{
+ const c=document.createElementNS(NS,'circle');
+ c.setAttribute('cx',h.x);c.setAttribute('cy',h.y);
+ c.setAttribute('r',h.d/2);
+ c.setAttribute('fill',i===selected?'#8de0e8':'white');
+ c.setAttribute('fill-opacity','.7');
+ c.setAttribute('stroke',i===selected?'#007c91':'#253746');
+ c.setAttribute('stroke-width',Math.max(.35,view.w/700));
+ c.dataset.index=i;
+ parts.appendChild(c);
+});
+}
+function choose(m){
+ mode=m;
+ ['select','pan','hole'].forEach(id=>
+ document.getElementById(id).classList.toggle('active',id===m));
+ message('Modalità: '+({select:'seleziona',pan:'sposta vista',hole:'inserisci foro'}[m]));
+}
+['select','pan','hole'].forEach(id=>
+ document.getElementById(id).addEventListener('click',()=>choose(id)));
+
+function point(e){
+ const r=svg.getBoundingClientRect();
+ return {x:view.x+(e.clientX-r.left)*view.w/r.width,
+         y:view.y+(e.clientY-r.top)*view.h/r.height};
+}
+board.addEventListener('pointerdown',e=>{
+ e.preventDefault();
+ board.setPointerCapture(e.pointerId);
+ const p=point(e);
+ moved=false;
+ gesture={x:e.clientX,y:e.clientY,px:p.x,py:p.y,
+          vx:view.x,vy:view.y};
+ if(mode==='select'){
+  const target=e.target.closest('circle');
+  selected=target?Number(target.dataset.index):-1;
+  render();
+ }
+});
+board.addEventListener('pointermove',e=>{
+ if(!gesture)return;
+ const dx=e.clientX-gesture.x,dy=e.clientY-gesture.y;
+ if(Math.abs(dx)+Math.abs(dy)>5)moved=true;
+ if(mode==='pan'&&moved){
+  const r=svg.getBoundingClientRect();
+  view.x=gesture.vx-dx*view.w/r.width;
+  view.y=gesture.vy-dy*view.h/r.height;
+  render();
+ }
+});
+board.addEventListener('pointerup',e=>{
+ if(!gesture)return;
+ const p=point(e);
+ if(!moved&&mode==='hole'){
+  const d=Number(document.getElementById('diameter').value);
+  if(!(d>0&&d<=100)){message('Inserisci un diametro valido.');gesture=null;return}
+  holes.push({x:p.x,y:p.y,d});
+  selected=holes.length-1;
+  render();message('Foro inserito: Ø '+d+' mm');
+ }else if(!moved&&mode==='select'&&selected>=0){
+  const target=e.target.closest('circle');
+  if(target){
+   const h=holes[selected];
+   message(`Foro selezionato: Ø ${h.d} mm · X ${h.x.toFixed(2)} · Y ${h.y.toFixed(2)}`);
+  }
+ }
+ gesture=null;
+});
+board.addEventListener('pointercancel',()=>gesture=null);
+
+function zoom(f){
+ const cx=view.x+view.w/2,cy=view.y+view.h/2;
+ view.w=Math.max(30,Math.min(1200,view.w*f));
+ view.h=view.w*2/3;
+ view.x=cx-view.w/2;view.y=cy-view.h/2;
+ render();
+}
+document.getElementById('plus').onclick=()=>zoom(.8);
+document.getElementById('minus').onclick=()=>zoom(1.25);
+
+document.getElementById('undo').onclick=()=>{
+ holes.pop();selected=-1;render();message('Ultimo foro rimosso');
+};
+document.getElementById('clear').onclick=()=>{
+ if(confirm('Cancellare tutti i fori del disegno?')){
+  holes=[];selected=-1;render();message('Disegno svuotato');
+ }
+};
+function data(){
+ return JSON.stringify({version:1,
+ project:document.getElementById('project').value,holes});
+}
+document.getElementById('save').onclick=()=>{
+ try{
+  localStorage.setItem('coltelli-cad-project',data());
+  message('Salvataggio locale completato');
+ }catch(e){message('Salvataggio non riuscito: esporta il progetto SVG')}
+};
+document.getElementById('export').onclick=()=>{
+ const clone=svg.cloneNode(true);
+ clone.setAttribute('xmlns',NS);
+ clone.setAttribute('width',view.w+'mm');
+ clone.setAttribute('height',view.h+'mm');
+ const blob=new Blob([new XMLSerializer().serializeToString(clone)],
+ {type:'image/svg+xml'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url;a.download='dima-coltello.svg';a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1500);
+ message('Esportazione SVG richiesta');
+};
+try{
+ const old=localStorage.getItem('coltelli-cad-project');
+ if(old){
+  const d=JSON.parse(old);
+  holes=Array.isArray(d.holes)?d.holes:[];
+  document.getElementById('project').value=d.project||'Progetto 1';
+ }
+}catch(e){}
+render();
+})();
+</script>
+</body>
+</html>
